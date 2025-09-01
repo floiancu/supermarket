@@ -1,6 +1,9 @@
 package com.supermarket.model;
 
 
+import com.supermarket.exception.CheckoutException;
+import com.supermarket.exception.ParseException;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -33,9 +36,11 @@ public class Supermarket {
                         .map(this::parsePricingTableLine)
                         .collect(Collectors.toUnmodifiableMap(item -> item.name().toLowerCase(), Function.identity()));
             }
-            throw new RuntimeException("Table header does not match format.");
-        } catch (Exception e) {
-            throw new RuntimeException("Error parsing pricing table.", e);
+            throw new ParseException("Table header does not match format.");
+        } catch (NumberFormatException e) {
+            throw new ParseException("Cannot parse numeric value.");
+        } catch (IllegalStateException e) {
+            throw new ParseException("Duplicate items in table.");
         }
     }
 
@@ -56,19 +61,33 @@ public class Supermarket {
     private Item parsePricingTableLine(String line) {
         String[] lineElements = line.substring(1).split("[|]");
         if(lineElements.length != 3) {
-            throw new RuntimeException("The number of columns do not match the format.");
+            throw new ParseException("The number of columns does not match the format.");
         }
-        return new Item(lineElements[0].trim(), Double.parseDouble(lineElements[1]),
-                lineElements[2].trim().equals("-") ? null : this.buildOffer(lineElements[2]));
+        double price = Double.parseDouble(lineElements[1]);
+        if(price <= 0) {
+            throw new ParseException("The price must be a positive number.");
+        }
+        return new Item(lineElements[0].trim(), price, lineElements[2].trim().equals("-") ? null : this.buildOffer(lineElements[2]));
     }
 
     private Offer buildOffer(String offerText) {
         String[] offerElements = offerText.trim().split(" ");
-        return new Offer(Double.parseDouble(offerElements[2]), Integer.parseInt(offerElements[0]));
+        if(offerElements.length != 3 || !offerElements[1].trim().equals("for")) {
+            throw new ParseException("Offer not formatted properly.");
+        }
+        double offerPrice = Double.parseDouble(offerElements[2]);
+        int offerQuantity = Integer.parseInt(offerElements[0]);
+        if(offerPrice <= 0 || offerQuantity <= 0) {
+            throw new ParseException("Offer price and quantity must be positive numbers.");
+        }
+        return new Offer(offerPrice, offerQuantity);
     }
 
     private Double getPrice(Map.Entry<String, Long> itemAndQuantity) {
         Item item = this.items.get(itemAndQuantity.getKey().trim().toLowerCase());
+        if(item == null) {
+            throw new CheckoutException(String.format("Item %s does not exist.", itemAndQuantity.getKey()));
+        }
         return (item.offer() == null) ?
                 itemAndQuantity.getValue() * item.price()
                 : (itemAndQuantity.getValue() / item.offer().quantity()) * item.offer().price() +
